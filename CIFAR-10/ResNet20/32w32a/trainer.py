@@ -20,7 +20,7 @@ model_names = sorted(name for name in resnet.__dict__
                      and callable(resnet.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pytorch')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20_1w1a',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20_32w32a',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
                     ' (default: resnet32)')
@@ -50,11 +50,13 @@ parser.add_argument('--half', dest='half', action='store_true',
                     help='use half-precision(16-bit) ')
 parser.add_argument('--save-dir', dest='save_dir',
                     help='The directory used to save the trained models',
-                    default='save_temp', type=str)
+                    default='../../../ckpt', type=str)
 parser.add_argument('--save-every', dest='save_every',
                     help='Saves checkpoints at every specified number of epochs',
                     type=int, default=10)
-
+parser.add_argument('--trial',
+                    help='trials name for save_dir purposes',
+                    default='W_A_a_N', type=str)
 best_prec1 = 0
 
 
@@ -62,13 +64,16 @@ def main():
     global args, best_prec1
     args = parser.parse_args()
 
+    args.save_dir = os.path.join(args.save_dir, args.arch)
+    args.save_dir = os.path.join(args.save_dir, args.trial)
+    args.save_dir = os.path.join(args.save_dir, "a-{}".format(args.epochs))
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
     model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
     model.cuda()
-    
+
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -88,7 +93,7 @@ def main():
                                      std=[0.229, 0.224, 0.225])
 
     train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+        datasets.CIFAR10(root='../../../data', train=True, transform=transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(32, 4),
             transforms.ToTensor(),
@@ -98,7 +103,7 @@ def main():
         num_workers=args.workers, pin_memory=True, drop_last=True)
 
     val_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
+        datasets.CIFAR10(root='../../../data', train=False, transform=transforms.Compose([
             transforms.ToTensor(),
             normalize,
         ])),
@@ -133,7 +138,7 @@ def main():
         Kmin, Kmax = math.log(K_min) / math.log(10), math.log(K_max) / math.log(10)
         return torch.tensor([math.pow(10, Kmin + (Kmax - Kmin) / args.epochs * epoch)]).float().cuda()
 
-    print (model.module)
+    # print (model.module)
 
     for epoch in range(args.start_epoch, args.epochs):
         t = Log_UP(T_min, T_max, epoch)
@@ -176,12 +181,12 @@ def main():
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
-            }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
+            }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.pth.tar'))
 
     save_checkpoint({
         'state_dict': model.state_dict(),
         'best_prec1': best_prec1,
-    }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+    }, is_best, filename=os.path.join(args.save_dir, 'best_model.pth.tar'))
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -202,7 +207,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        target = target.cuda(async=True)
+        target = target.cuda()
         input_var = torch.autograd.Variable(input).cuda()
         target_var = torch.autograd.Variable(target)
         if args.half:
@@ -221,8 +226,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
         loss = loss.float()
         # measure accuracy and record loss
         prec1 = accuracy(output.data, target)[0]
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
+        losses.update(loss.data.item(), input.size(0))
+        top1.update(prec1.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -251,7 +256,7 @@ def validate(val_loader, model, criterion):
 
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
-        target = target.cuda(async=True)
+        target = target.cuda()
         input_var = torch.autograd.Variable(input, volatile=True).cuda()
         target_var = torch.autograd.Variable(target, volatile=True)
 
@@ -267,8 +272,8 @@ def validate(val_loader, model, criterion):
 
         # measure accuracy and record loss
         prec1 = accuracy(output.data, target)[0]
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
+        losses.update(loss.data.item(), input.size(0))
+        top1.update(prec1.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -291,8 +296,8 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     """
     Save the training model
     """
-    # torch.save(state, filename)
-    pass
+    torch.save(state, filename)
+    # pass
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
